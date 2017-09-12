@@ -1,0 +1,17 @@
+<Categories>
+	<Category>
+		<id>001</id>
+		<name>ConsumerGoods</name>
+		<discPerc>5</discPerc>
+	</Category>
+	<Category>
+		<id>002</id>
+		<name>OrganicFood</name>
+		<discPerc>7</discPerc>
+	</Category>	
+	<Category>
+		<id>005</id>
+		<name>Apparrel</name>
+		<discPerc>15</discPerc>
+	</Category>
+</Categories>
