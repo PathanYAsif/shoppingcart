@@ -3,15 +3,19 @@ package com.adp.vo;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.Collections;
-import java.util.Formatter;
+import java.util.HashMap;
 import java.util.List;
 import java.util.ListIterator;
+import java.util.Map;
 
-public class ItemizedBill extends Bill {
+public class ItemizedBill implements Bill {
 
 	private Categories categories;
 	private DiscountSlabs discountSlabs;
 	private ShoppingCart cart;
+	Map<Item, BigDecimal> itemDiscountMap = new HashMap<>();
+	private BigDecimal netBillAmount = new BigDecimal(0).setScale(2, RoundingMode.CEILING);
+	private BigDecimal grossBillAmount = new BigDecimal(0).setScale(2, RoundingMode.CEILING);
 
 	public static class Builder {
 
@@ -51,64 +55,6 @@ public class ItemizedBill extends Bill {
 		this.cart = cart;
 	}
 
-	@Override
-	public void printBill() {
-		List<Item> items = cart.getItems();
-		BigDecimal sum = new BigDecimal(0).setScale(2, RoundingMode.CEILING);
-		int count = 0;
-		try (Formatter formatter = new Formatter()) {
-			System.out.println(formatter.format("%1$4s   %2$-25s   %3$10s   %4$-8s   %5$-11s   %6$-13s", "#", "Name",
-					"Price", "Quantity", "Total Price", "Discount Price"));
-		}
-
-		// TODO: check precision
-		BigDecimal totalDiscount = new BigDecimal(0).setScale(2, RoundingMode.CEILING);
-		for (Item item : items) {
-			try (Formatter formatter = new Formatter()) {
-				String categoryId = item.getCategoryId();
-				BigDecimal categoryDiscountPercent = getCategoryDiscount(categoryId);
-				BigDecimal discount = item.getTotalCost().multiply(categoryDiscountPercent).divide(new BigDecimal(100))
-						.setScale(2, RoundingMode.CEILING);
-				totalDiscount = totalDiscount.add(discount).setScale(2, RoundingMode.CEILING);
-				;
-				BigDecimal netTotalCost = item.getTotalCost().subtract(discount).setScale(2, RoundingMode.CEILING);
-				System.out.println(formatter.format("%1$3s.   %2$-25s   %3$10s   %4$8s   %5$11s   %6$14s", ++count,
-						item.getName(), item.getPrice(), item.getQuantity(), item.getTotalCost(), netTotalCost));
-				sum = sum.add(netTotalCost);
-			}
-		}
-
-		BigDecimal slabDiscount = new BigDecimal(0).setScale(2, RoundingMode.CEILING);
-		BigDecimal eligibleSum = sum;
-		// Flat slab assumption - slabs do not overlap and are continuous e.g. 0
-		// - 100, 101 - 200
-		Collections.sort(discountSlabs.getSlabs());
-		ListIterator<Slab> iterator = discountSlabs.getSlabs().listIterator(discountSlabs.getSlabs().size());
-		while (iterator.hasPrevious()) {
-			Slab slab = iterator.previous();
-			if ((0 <= eligibleSum.compareTo(slab.getRangeMin())) && (null == slab.getRangeMax())
-					|| (0 <= eligibleSum.compareTo(slab.getRangeMin())
-							&& 0 >= eligibleSum.compareTo(slab.getRangeMax()))) {
-				eligibleSum = eligibleSum.subtract(slab.getRangeMin());
-				BigDecimal discount = eligibleSum.multiply(slab.getDiscountPercent()).divide(new BigDecimal(100));
-				slabDiscount = slabDiscount.add(discount);
-			}
-		}
-
-		totalDiscount = totalDiscount.add(slabDiscount).setScale(2, RoundingMode.CEILING);
-
-		BigDecimal netTotal = sum.subtract(slabDiscount).setScale(2, RoundingMode.CEILING);
-		StringBuilder sb = new StringBuilder();
-		try (Formatter formatter = new Formatter(sb)) {
-			System.out.println(formatter.format("%1$70s  %2$15s", "Total(after category discount)", sum));
-			sb.setLength(0);
-			System.out.println(formatter.format("%1$70s  %2$15s", "Final Discount Price", netTotal));
-			sb.setLength(0);
-			System.out.println(
-					formatter.format("%1$70s  %2$15s", "Total Applied discount(Category + Slab)", totalDiscount));
-		}
-	}
-
 	private BigDecimal getCategoryDiscount(String id) {
 		for (Category category : this.categories.getCategoryList()) {
 			if (category.getId().equals(id)) {
@@ -118,4 +64,64 @@ public class ItemizedBill extends Bill {
 		return new BigDecimal(0);
 	}
 
+	@Override
+	public BigDecimal getItemDiscountByCategory(Item item) {
+		BigDecimal discount = itemDiscountMap.get(item);
+		if (null == discount) {
+			discount = new BigDecimal(0).setScale(2, RoundingMode.CEILING);
+			String categoryId = item.getCategoryId();
+			BigDecimal categoryDiscountPercent = getCategoryDiscount(categoryId);
+			discount = item.getTotalCost().multiply(categoryDiscountPercent).divide(new BigDecimal(100));
+			itemDiscountMap.put(item, discount);
+		}
+		return discount;
+	}
+
+	@Override
+	public BigDecimal getItemDiscountPrice(Item item) {
+		BigDecimal discount = getItemDiscountByCategory(item);
+		return item.getTotalCost().subtract(discount).setScale(2, RoundingMode.CEILING);
+	}
+
+	private BigDecimal getSlabDiscount(BigDecimal grossBillAmount) {
+		Collections.sort(discountSlabs.getSlabs());
+		ListIterator<Slab> iterator = discountSlabs.getSlabs().listIterator(discountSlabs.getSlabs().size());
+		BigDecimal slabDiscount = new BigDecimal(0).setScale(2, RoundingMode.CEILING);
+		while (iterator.hasPrevious()) {
+			Slab slab = iterator.previous();
+			if ((0 <= grossBillAmount.compareTo(slab.getRangeMin())) && (null == slab.getRangeMax())
+					|| (0 <= grossBillAmount.compareTo(slab.getRangeMin())
+							&& 0 >= grossBillAmount.compareTo(slab.getRangeMax()))) {
+				grossBillAmount = grossBillAmount.subtract(slab.getRangeMin());
+				BigDecimal discount = grossBillAmount.multiply(slab.getDiscountPercent()).divide(new BigDecimal(100));
+				slabDiscount = slabDiscount.add(discount);
+			}
+		}
+		return slabDiscount;
+	}
+
+	private BigDecimal getNetBillAmount(BigDecimal grossBillAmount) {
+		netBillAmount = grossBillAmount.subtract(getSlabDiscount(grossBillAmount)).setScale(2, RoundingMode.CEILING);
+		return netBillAmount;
+	}
+
+	@Override
+	public BigDecimal getGrossBillAmount() {
+		if (!cart.getItems().isEmpty() && grossBillAmount.equals(new BigDecimal(0).setScale(2, RoundingMode.CEILING))) {
+			for (Item item : cart.getItems()) {
+				grossBillAmount = grossBillAmount.add(getItemDiscountPrice(item)).setScale(2, RoundingMode.CEILING);
+			}
+		}
+		return grossBillAmount;
+	}
+
+	@Override
+	public BigDecimal getNetBillAmount() {
+		return getNetBillAmount(getGrossBillAmount());
+	}
+
+	@Override
+	public List<Item> getItems() {
+		return cart.getItems();
+	}
 }

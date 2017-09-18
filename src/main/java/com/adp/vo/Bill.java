@@ -1,8 +1,18 @@
 package com.adp.vo;
 
-public abstract class Bill {
+import java.math.BigDecimal;
+import java.util.List;
 
-	public abstract void printBill();
+public interface Bill {
 
-	// TODO: Add methods to output XML, JSON format for bill
+	List<Item> getItems();
+
+	BigDecimal getGrossBillAmount();
+
+	BigDecimal getNetBillAmount();
+
+	BigDecimal getItemDiscountPrice(Item item);
+
+	BigDecimal getItemDiscountByCategory(Item item);
+
 }
